@@ -1,0 +1,74 @@
+{
+  "crops": [
+    "Cotton",
+    "Maize",
+    "Potato",
+    "Rice",
+    "Soybean",
+    "Sugarcane",
+    "Tomato",
+    "Wheat"
+  ],
+  "soils": [
+    "Clay",
+    "Loamy",
+    "Peaty",
+    "Sandy",
+    "Silt"
+  ],
+  "seasons": [
+    "Kharif",
+    "Rabi",
+    "Zaid"
+  ],
+  "states": [
+    "Bihar",
+    "Haryana",
+    "Karnataka",
+    "MP",
+    "Maharashtra",
+    "Punjab",
+    "UP",
+    "West Bengal"
+  ],
+  "features": [
+    "crop_enc",
+    "soil_enc",
+    "season_enc",
+    "state_enc",
+    "rainfall_mm",
+    "temperature",
+    "humidity",
+    "fertilizer_kg",
+    "pesticide_kg",
+    "area_hectares"
+  ],
+  "best_model": "Gradient Boosting",
+  "metrics": {
+    "r2": 0.9996,
+    "mae": 0.2994,
+    "rmse": 0.3719
+  },
+  "all_results": {
+    "Linear Regression": {
+      "r2": 0.1191,
+      "mae": 13.4078,
+      "rmse": 18.0574
+    },
+    "Decision Tree": {
+      "r2": 0.9992,
+      "mae": 0.4227,
+      "rmse": 0.5397
+    },
+    "Random Forest": {
+      "r2": 0.9996,
+      "mae": 0.3224,
+      "rmse": 0.4043
+    },
+    "Gradient Boosting": {
+      "r2": 0.9996,
+      "mae": 0.2994,
+      "rmse": 0.3719
+    }
+  }
+}
