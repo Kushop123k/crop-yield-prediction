@@ -81,48 +81,79 @@ def analyze_disease(image_bytes: bytes, crop: str = "Unknown") -> dict:
         # ── Color analysis in HSV ──
         img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
 
-        # Green pixels (healthy leaf tissue)
-        green_mask  = cv2.inRange(img_hsv, (35, 40, 40), (85, 255, 255))
-        green_ratio = float(np.sum(green_mask > 0)) / (256 * 256)
+        # ── Step 1: Isolate the leaf from background ──
+        # Background is typically vivid green (garden/field backdrop)
+        bg_green_mask = cv2.inRange(img_hsv, (36, 60, 60), (85, 255, 255))
+        # Leaf mask = everything that is NOT background green
+        leaf_mask = cv2.bitwise_not(bg_green_mask)
+        # Remove very dark/shadow pixels from leaf mask
+        dark_mask = cv2.inRange(img_hsv, (0, 0, 0), (180, 255, 30))
+        leaf_mask = cv2.bitwise_and(leaf_mask, cv2.bitwise_not(dark_mask))
 
-        # Brown/dark pixels (necrosis, blight)
-        brown_mask  = cv2.inRange(img_hsv, (5, 50, 30), (25, 200, 150))
-        brown_ratio = float(np.sum(brown_mask > 0)) / (256 * 256)
+        total_leaf_px = float(np.sum(leaf_mask > 0)) or 1.0
+        total_px      = float(256 * 256)
 
-        # Orange-rust pixels
-        rust_mask   = cv2.inRange(img_hsv, (8, 100, 100), (20, 255, 220))
-        rust_ratio  = float(np.sum(rust_mask > 0)) / (256 * 256)
+        # ── Step 2: Analyze only LEAF pixels ──
 
-        # White/pale pixels (powdery mildew)
-        white_mask  = cv2.inRange(img_hsv, (0, 0, 200), (180, 40, 255))
-        white_ratio = float(np.sum(white_mask > 0)) / (256 * 256)
+        # Healthy green on the leaf itself (darker, less saturated than background)
+        healthy_green_mask = cv2.inRange(img_hsv, (30, 30, 40), (85, 180, 200))
+        healthy_green_mask = cv2.bitwise_and(healthy_green_mask, leaf_mask)
+        green_ratio = float(np.sum(healthy_green_mask > 0)) / total_leaf_px
 
-        # Yellow pixels (nutrient deficiency / blight)
-        yellow_mask = cv2.inRange(img_hsv, (22, 60, 120), (38, 255, 255))
-        yellow_ratio = float(np.sum(yellow_mask > 0)) / (256 * 256)
+        # Brown/necrotic tissue (blight, dead cells)
+        brown_mask = cv2.inRange(img_hsv, (5, 40, 30), (22, 220, 180))
+        brown_mask = cv2.bitwise_and(brown_mask, leaf_mask)
+        brown_ratio = float(np.sum(brown_mask > 0)) / total_leaf_px
 
-        # ── Disease classification logic ──
-        if green_ratio > 0.50 and brown_ratio < 0.08 and rust_ratio < 0.05:
-            disease    = "Healthy"
-            confidence = min(90, int(green_ratio * 130))
-        elif rust_ratio > 0.10:
-            disease    = "Leaf Rust"
-            confidence = min(88, int(rust_ratio * 400))
-        elif brown_ratio > 0.25:
+        # Very dark / blackened tissue (severe blight, necrosis)
+        dark_brown_mask = cv2.inRange(img_hsv, (0, 20, 15), (25, 200, 80))
+        dark_brown_mask = cv2.bitwise_and(dark_brown_mask, leaf_mask)
+        dark_ratio = float(np.sum(dark_brown_mask > 0)) / total_leaf_px
+
+        # Orange-rust pustules
+        rust_mask = cv2.inRange(img_hsv, (8, 100, 100), (20, 255, 220))
+        rust_mask = cv2.bitwise_and(rust_mask, leaf_mask)
+        rust_ratio = float(np.sum(rust_mask > 0)) / total_leaf_px
+
+        # White/pale coating (powdery mildew)
+        white_mask = cv2.inRange(img_hsv, (0, 0, 200), (180, 40, 255))
+        white_mask = cv2.bitwise_and(white_mask, leaf_mask)
+        white_ratio = float(np.sum(white_mask > 0)) / total_leaf_px
+
+        # Yellow chlorosis (nutrient deficiency / bacterial blight)
+        yellow_mask = cv2.inRange(img_hsv, (22, 50, 120), (35, 255, 255))
+        yellow_mask = cv2.bitwise_and(yellow_mask, leaf_mask)
+        yellow_ratio = float(np.sum(yellow_mask > 0)) / total_leaf_px
+
+        # Combined damage ratio
+        damage_ratio = brown_ratio + dark_ratio + rust_ratio
+
+        # ── Step 3: Classify based on leaf-only analysis ──
+        if damage_ratio > 0.45 or dark_ratio > 0.25:
+            # Heavily damaged / dead leaf
             disease    = "Late Blight"
-            confidence = min(87, int(brown_ratio * 250))
+            confidence = min(90, int(55 + damage_ratio * 80))
+        elif rust_ratio > 0.12:
+            disease    = "Leaf Rust"
+            confidence = min(88, int(55 + rust_ratio * 250))
         elif white_ratio > 0.15:
             disease    = "Powdery Mildew"
-            confidence = min(85, int(white_ratio * 350))
-        elif yellow_ratio > 0.20 and green_ratio < 0.30:
+            confidence = min(86, int(55 + white_ratio * 200))
+        elif yellow_ratio > 0.20 and green_ratio < 0.25:
             disease    = "Bacterial Leaf Blight"
-            confidence = min(82, int(yellow_ratio * 280))
-        elif yellow_ratio > 0.12:
+            confidence = min(84, int(55 + yellow_ratio * 150))
+        elif yellow_ratio > 0.12 or (brown_ratio > 0.10 and green_ratio < 0.40):
             disease    = "Nutrient Deficiency"
-            confidence = min(80, int(yellow_ratio * 300))
+            confidence = min(82, int(55 + (yellow_ratio + brown_ratio) * 100))
+        elif damage_ratio > 0.15:
+            disease    = "Late Blight"
+            confidence = min(78, int(55 + damage_ratio * 120))
+        elif green_ratio > 0.50 and damage_ratio < 0.05:
+            disease    = "Healthy"
+            confidence = min(92, int(60 + green_ratio * 60))
         else:
             disease    = "Healthy"
-            confidence = 62
+            confidence = 60
 
         profile = DISEASE_PROFILES.get(disease, DISEASE_PROFILES["Healthy"])
 
@@ -141,11 +172,13 @@ def analyze_disease(image_bytes: bytes, crop: str = "Unknown") -> dict:
             "affected_crops": profile.get("affected_crops", ["All crops"]),
             "thumbnail_b64":  thumb_b64,
             "pixel_analysis": {
-                "green_%":  round(green_ratio * 100, 1),
-                "brown_%":  round(brown_ratio * 100, 1),
-                "rust_%":   round(rust_ratio * 100, 1),
-                "yellow_%": round(yellow_ratio * 100, 1),
-                "white_%":  round(white_ratio * 100, 1),
+                "green_%":       round(green_ratio * 100, 1),
+                "brown_%":       round(brown_ratio * 100, 1),
+                "dark_brown_%":  round(dark_ratio * 100, 1),
+                "rust_%":        round(rust_ratio * 100, 1),
+                "yellow_%":      round(yellow_ratio * 100, 1),
+                "white_%":       round(white_ratio * 100, 1),
+                "total_damage_%":round((damage_ratio) * 100, 1),
             },
             "crop": crop
         }
