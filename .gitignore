@@ -1,0 +1,31 @@
+node_modules
+# Large dataset folders — DO NOT push
+backend/PlantVillage/
+backend/Soil types/
+backend/soil_dataset/
+backend/leaf_dataset/
+
+# Trained model files — too large for GitHub
+backend/models/*.h5
+backend/models/*.pkl
+
+# Keep these model files (small)
+!backend/models/metadata.json
+!backend/models/soil_classes.json
+!backend/models/leaf_classes.json
+
+# Python cache
+backend/__pycache__/
+*.pyc
+*.pyo
+
+# Node modules — never push
+node_modules/
+frontend/node_modules/
+
+# Vite cache
+node_modules/.vite/
+
+# OS files
+.DS_Store
+Thumbs.db

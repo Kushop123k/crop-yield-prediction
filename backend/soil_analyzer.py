@@ -1,161 +1,63 @@
 """
-Soil Image Analyzer
-===================
-Classifies soil type from uploaded image using color & texture analysis.
-In a real project this would use a trained CNN (MobileNetV2 etc.).
-Here we use OpenCV color-space analysis which works well for demonstration.
-
-Install: pip install opencv-python Pillow
+Soil Image Analyzer — CNN Edition
+Uses trained MobileNetV2 (soil_cnn_model.h5).
+Falls back to color analysis if model not found.
 """
+import cv2, numpy as np, base64, json, os
 
-import cv2
-import numpy as np
-from PIL import Image
-import io
-import base64
+CNN_MODEL = None; CNN_CLASSES = []
+try:
+    import tensorflow as tf
+    if os.path.exists("models/soil_cnn_model.h5") and os.path.exists("models/soil_classes.json"):
+        CNN_MODEL = tf.keras.models.load_model("models/soil_cnn_model.h5")
+        with open("models/soil_classes.json") as f: CNN_CLASSES = json.load(f)
+        print(f"✅ Soil CNN loaded: {CNN_CLASSES}")
+    else:
+        print("⚠️  Soil CNN not found — using color fallback. Run: python train_soil_model.py")
+except ImportError:
+    print("⚠️  TensorFlow not installed")
 
-
-SOIL_PROFILES = {
-    "Sandy": {
-        "description": "Light-colored, loose, gritty texture. Low water retention.",
-        "color_hint":  "Light yellow / beige",
-        "hue_range":   (15, 35),
-        "sat_range":   (20, 120),
-        "val_range":   (160, 255),
-        "crops":       ["Groundnut", "Watermelon", "Carrot", "Potato", "Cassava"],
-        "fertility":   "Low",
-        "water_retention": "Very Low",
-        "ph_range":    "5.5 – 7.0",
-        "tips": "Add organic matter & compost. Requires frequent irrigation."
-    },
-    "Loamy": {
-        "description": "Dark brown, crumbly mix of sand, silt & clay. Best for farming.",
-        "color_hint":  "Dark brown",
-        "hue_range":   (8, 22),
-        "sat_range":   (80, 200),
-        "val_range":   (60, 150),
-        "crops":       ["Rice", "Wheat", "Maize", "Vegetables", "Cotton", "Soybean"],
-        "fertility":   "High",
-        "water_retention": "Moderate",
-        "ph_range":    "6.0 – 7.0",
-        "tips": "Ideal soil. Maintain with crop rotation and minimal tillage."
-    },
-    "Clay": {
-        "description": "Heavy, sticky, reddish-grey soil. High nutrient but poor drainage.",
-        "color_hint":  "Reddish grey / dark grey",
-        "hue_range":   (0, 12),
-        "sat_range":   (30, 160),
-        "val_range":   (60, 130),
-        "crops":       ["Rice", "Sugarcane", "Wheat", "Mustard", "Jute"],
-        "fertility":   "High",
-        "water_retention": "High",
-        "ph_range":    "6.0 – 8.0",
-        "tips": "Improve drainage with sand/organic matter. Avoid overwatering."
-    },
-    "Silt": {
-        "description": "Fine, smooth, greyish soil. Fertile but prone to compaction.",
-        "color_hint":  "Light grey / silvery",
-        "hue_range":   (10, 30),
-        "sat_range":   (5, 60),
-        "val_range":   (140, 220),
-        "crops":       ["Rice", "Vegetables", "Wheat", "Sugarcane", "Barley"],
-        "fertility":   "Moderate-High",
-        "water_retention": "High",
-        "ph_range":    "6.0 – 7.5",
-        "tips": "Good for farming. Add organic matter to prevent compaction."
-    },
-    "Peaty": {
-        "description": "Very dark/black, spongy, high organic matter content.",
-        "color_hint":  "Almost black / very dark brown",
-        "hue_range":   (5, 20),
-        "sat_range":   (40, 130),
-        "val_range":   (20, 80),
-        "crops":       ["Vegetables", "Root crops", "Blueberries", "Potatoes"],
-        "fertility":   "Moderate",
-        "water_retention": "Very High",
-        "ph_range":    "3.5 – 6.0",
-        "tips": "Acidic — add lime to raise pH. Good organic matter base."
-    },
+SOIL_INFO = {
+    "Sandy":{"description":"Light-colored, loose, gritty. Very low water retention.","fertility":"Low","water_retention":"Very Low","ph_range":"5.5–7.0","color_hint":"Light yellow/beige","crops":["Groundnut","Watermelon","Potato","Cassava"],"tips":"Add organic matter. Frequent irrigation needed.","hue_range":(15,35),"sat_range":(20,120),"val_range":(160,255)},
+    "Loamy":{"description":"Dark brown, crumbly mix. Best farming soil.","fertility":"High","water_retention":"Moderate","ph_range":"6.0–7.0","color_hint":"Dark brown","crops":["Rice","Wheat","Maize","Vegetables","Cotton"],"tips":"Ideal soil. Maintain with crop rotation.","hue_range":(8,22),"sat_range":(80,200),"val_range":(60,150)},
+    "Clay": {"description":"Heavy, sticky, reddish-grey. High nutrients, poor drainage.","fertility":"High","water_retention":"High","ph_range":"6.0–8.0","color_hint":"Reddish grey","crops":["Rice","Sugarcane","Wheat","Jute"],"tips":"Add sand/compost for drainage. Avoid overwatering.","hue_range":(0,12),"sat_range":(30,160),"val_range":(60,130)},
+    "Silt": {"description":"Fine, smooth, greyish. Fertile but compacts easily.","fertility":"Moderate-High","water_retention":"High","ph_range":"6.0–7.5","color_hint":"Light grey","crops":["Rice","Vegetables","Wheat","Barley"],"tips":"Add organic matter to prevent compaction.","hue_range":(10,30),"sat_range":(5,60),"val_range":(140,220)},
+    "Peaty":{"description":"Very dark, spongy, high organic matter.","fertility":"Moderate","water_retention":"Very High","ph_range":"3.5–6.0","color_hint":"Almost black","crops":["Vegetables","Root crops","Potatoes"],"tips":"Acidic — add lime. Good organic base.","hue_range":(5,20),"sat_range":(40,130),"val_range":(20,80)},
 }
 
+def _range_score(v, r):
+    lo,hi=r; mid=(lo+hi)/2; w=(hi-lo)/2 or 1
+    return max(0.0, 1.0-abs(v-mid)/(w*2))
 
-def analyze_soil_image(image_bytes: bytes) -> dict:
-    """
-    Analyze soil image and return classified soil type with details.
-    
-    Args:
-        image_bytes: Raw image bytes from upload
-    
-    Returns:
-        dict with soil_type, confidence, details, crop recommendations
-    """
+def _color_fallback(img):
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    mask=cv2.inRange(hsv,(0,10,20),(180,255,235))
+    mh=float(np.mean(hsv[:,:,0][mask>0]) if mask.any() else np.mean(hsv[:,:,0]))
+    ms=float(np.mean(hsv[:,:,1][mask>0]) if mask.any() else np.mean(hsv[:,:,1]))
+    mv=float(np.mean(hsv[:,:,2][mask>0]) if mask.any() else np.mean(hsv[:,:,2]))
+    scores={s:(_range_score(mh,p["hue_range"])*0.4+_range_score(ms,p["sat_range"])*0.3+_range_score(mv,p["val_range"])*0.3) for s,p in SOIL_INFO.items()}
+    best=max(scores,key=scores.get); total=sum(scores.values()) or 1
+    return best, min(75,max(50,int((scores[best]/total)*300))), {k:round(v/total*100,1) for k,v in scores.items()}, "Color Analysis (fallback)"
+
+def analyze_soil_image(image_bytes:bytes)->dict:
     try:
-        # Decode image
-        img_array = np.frombuffer(image_bytes, np.uint8)
-        img_bgr   = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-        if img_bgr is None:
-            return {"error": "Could not read image. Please upload a clear soil photo."}
-
-        # Resize for consistent analysis
-        img_bgr = cv2.resize(img_bgr, (224, 224))
-
-        # Convert to HSV color space (better for soil color analysis)
-        img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-
-        # Get mean & std of H, S, V channels (ignore very dark/bright pixels)
-        mask = cv2.inRange(img_hsv, (0, 10, 20), (180, 255, 235))
-        mean_h = float(np.mean(img_hsv[:, :, 0][mask > 0])) if mask.any() else float(np.mean(img_hsv[:, :, 0]))
-        mean_s = float(np.mean(img_hsv[:, :, 1][mask > 0])) if mask.any() else float(np.mean(img_hsv[:, :, 1]))
-        mean_v = float(np.mean(img_hsv[:, :, 2][mask > 0])) if mask.any() else float(np.mean(img_hsv[:, :, 2]))
-
-        # Score each soil type
-        scores = {}
-        for soil, profile in SOIL_PROFILES.items():
-            h_score = _range_score(mean_h, profile["hue_range"])
-            s_score = _range_score(mean_s, profile["sat_range"])
-            v_score = _range_score(mean_v, profile["val_range"])
-            scores[soil] = (h_score * 0.4 + s_score * 0.3 + v_score * 0.3)
-
-        # Pick best match
-        best_soil = max(scores, key=scores.get)
-        raw_conf  = scores[best_soil]
-
-        # Normalize confidence to 55–92% range (realistic for color-based analysis)
-        total     = sum(scores.values()) or 1
-        confidence = min(92, max(55, int((raw_conf / total) * 300)))
-
-        profile = SOIL_PROFILES[best_soil]
-
-        # Build thumbnail base64 for response
-        _, enc = cv2.imencode('.jpg', cv2.resize(img_bgr, (120, 120)))
-        thumb_b64 = base64.b64encode(enc.tobytes()).decode()
-
-        return {
-            "soil_type":        best_soil,
-            "confidence":       confidence,
-            "description":      profile["description"],
-            "fertility":        profile["fertility"],
-            "water_retention":  profile["water_retention"],
-            "ph_range":         profile["ph_range"],
-            "color_hint":       profile["color_hint"],
-            "recommended_crops": profile["crops"],
-            "tips":             profile["tips"],
-            "thumbnail_b64":    thumb_b64,
-            "color_analysis": {
-                "hue":        round(mean_h, 1),
-                "saturation": round(mean_s, 1),
-                "brightness": round(mean_v, 1),
-            },
-            "all_scores": {k: round(v / total * 100, 1) for k, v in scores.items()}
-        }
-
+        img=cv2.imdecode(np.frombuffer(image_bytes,np.uint8),cv2.IMREAD_COLOR)
+        if img is None: return {"error":"Cannot read image."}
+        img=cv2.resize(img,(224,224))
+        if CNN_MODEL is not None:
+            rgb=cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
+            preds=CNN_MODEL.predict(np.expand_dims(rgb/255.0,0).astype(np.float32),verbose=0)[0]
+            soil=CNN_CLASSES[int(np.argmax(preds))]; conf=int(np.max(preds)*100)
+            scores={CNN_CLASSES[i]:round(float(preds[i])*100,1) for i in range(len(CNN_CLASSES))}
+            method="CNN (MobileNetV2)"
+        else:
+            soil,conf,scores,method=_color_fallback(img)
+        info=SOIL_INFO.get(soil,{})
+        _,enc=cv2.imencode('.jpg',cv2.resize(img,(120,120)))
+        return {"soil_type":soil,"confidence":conf,"method":method,"description":info.get("description",""),
+                "fertility":info.get("fertility","—"),"water_retention":info.get("water_retention","—"),
+                "ph_range":info.get("ph_range","—"),"color_hint":info.get("color_hint","—"),
+                "recommended_crops":info.get("crops",[]),"tips":info.get("tips",""),
+                "thumbnail_b64":base64.b64encode(enc.tobytes()).decode(),"all_scores":scores}
     except Exception as e:
-        return {"error": str(e)}
-
-
-def _range_score(value: float, range_tuple: tuple) -> float:
-    lo, hi = range_tuple
-    mid = (lo + hi) / 2
-    width = (hi - lo) / 2 or 1
-    return max(0.0, 1.0 - abs(value - mid) / (width * 2))
+        return {"error":str(e)}

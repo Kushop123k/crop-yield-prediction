@@ -56,9 +56,26 @@ export default function DiseaseDetector() {
       <div className="analyzer-layout">
         {/* Upload Panel */}
         <div className="upload-panel">
-          <div className="form-field" style={{ marginBottom:16 }}>
-            <label>Select Crop Type</label>
-            <select value={crop} onChange={e => setCrop(e.target.value)}>
+          <div style={{ marginBottom:20 }}>
+            <label style={{
+              display:"block", fontSize:"0.82rem", fontWeight:600,
+              color:"var(--text-mid)", marginBottom:8, letterSpacing:"0.3px"
+            }}>
+              🌿 Crop Type
+            </label>
+            <select value={crop} onChange={e => setCrop(e.target.value)}
+              style={{
+                width:"100%", padding:"12px 16px",
+                borderRadius:10, border:"1.5px solid var(--cream-dark)",
+                background:"var(--cream)", fontFamily:"'DM Sans', sans-serif",
+                fontSize:"0.95rem", color:"var(--text-dark)",
+                outline:"none", cursor:"pointer",
+                appearance:"none",
+                backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%232d6a4f' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`,
+                backgroundRepeat:"no-repeat",
+                backgroundPosition:"right 14px center",
+                paddingRight:36,
+              }}>
               {CROPS.map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
@@ -123,7 +140,7 @@ export default function DiseaseDetector() {
               <div className="soil-result-badge" style={{ background: sev.bg }}>
                 <div className="soil-type-label" style={{ color: sev.color }}>Disease Detected</div>
                 <div className="soil-type-name" style={{ color: sev.color }}>
-                  {result.color_emoji} {result.disease}
+                  {result.color_emoji} {result.disease.replace(/_/g, " ")}
                 </div>
                 <div className="soil-confidence">
                   Confidence: <strong>{result.confidence}%</strong> &nbsp;|&nbsp;
@@ -140,11 +157,16 @@ export default function DiseaseDetector() {
                 <h3>📋 Diagnosis</h3>
                 <p style={{ fontSize:"0.92rem", color:"var(--text-mid)", lineHeight:1.7 }}>{result.description}</p>
                 <div className="detail-row" style={{ marginTop:12 }}>
-                  <span>Crop Analyzed</span><span>{result.crop}</span>
+                  <span>Detected Crop</span>
+                  <span style={{ fontWeight:600, color:"var(--green-dark)" }}>{result.detected_crop || result.crop}</span>
                 </div>
                 <div className="detail-row">
                   <span>Commonly Affects</span>
                   <span>{result.affected_crops?.join(", ")}</span>
+                </div>
+                <div className="detail-row">
+                  <span>Detection Method</span>
+                  <span style={{ color:"var(--green-mid)", fontWeight:600 }}>{result.method}</span>
                 </div>
               </div>
 
@@ -160,19 +182,23 @@ export default function DiseaseDetector() {
                 <p style={{ fontSize:"0.92rem", color:"var(--text-mid)", lineHeight:1.7 }}>{result.prevention}</p>
               </div>
 
-              {/* Pixel Analysis */}
+              {/* CNN Score Breakdown */}
               <div className="section-card">
-                <h3>🎨 Leaf Color Analysis</h3>
-                {Object.entries(result.pixel_analysis || {}).map(([key, val]) => (
-                  <div key={key} style={{ marginBottom:10 }}>
+                <h3>📊 CNN Confidence Scores</h3>
+                {Object.entries(result.pixel_analysis || {}).sort((a,b)=>b[1]-a[1]).map(([key, val]) => (
+                  <div key={key} style={{ marginBottom:12 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.88rem", marginBottom:4 }}>
-                      <span>{key}</span><span>{val}%</span>
+                      <span style={{ fontWeight: key === result.disease ? 600 : 400,
+                        color: key === result.disease ? "var(--green-dark)" : "var(--text-mid)" }}>
+                        {key === result.disease ? "🎯 " : ""}{key.replace(/_/g," ")}
+                      </span>
+                      <span style={{ fontWeight:600 }}>{val}%</span>
                     </div>
                     <div style={{ background:"var(--cream-dark)", borderRadius:8, height:8 }}>
                       <div style={{
-                        width:`${Math.min(val * 2, 100)}%`,
-                        background: key.includes("green") ? "#52b788" : key.includes("brown") ? "#a0522d" : key.includes("rust") ? "#e07a5f" : key.includes("yellow") ? "#f4c430" : "#aaa",
-                        height:8, borderRadius:8
+                        width:`${Math.min(val, 100)}%`,
+                        background: key === result.disease ? sev.color : "#c8e6c9",
+                        height:8, borderRadius:8, transition:"width 0.5s"
                       }} />
                     </div>
                   </div>
